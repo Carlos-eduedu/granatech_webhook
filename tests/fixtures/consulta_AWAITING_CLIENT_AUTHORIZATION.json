@@ -1,0 +1,9 @@
+{
+  "id_solicitacao": "a7e3587e-cd73-4998-bae3-ec000ab6bb6b",
+  "id_proposta": "6fdf2acb-cd75-416f-8754-3744e786a6a6",
+  "cpf": "33179781041",
+  "status": "AWAITING_CLIENT_AUTHORIZATION",
+  "user_id": "12500542068.38",
+  "corban_id": 38,
+  "tipo": "CONSULTA"
+}

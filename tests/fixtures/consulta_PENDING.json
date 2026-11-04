@@ -1,0 +1,9 @@
+{
+  "id_solicitacao": "d0b68ba1-f0a6-4cc1-ed16-1f333de9ee9e",
+  "id_proposta": "6fdf2acb-cd75-416f-8754-3744e786a6a6",
+  "cpf": "01234567890",
+  "status": "PENDING",
+  "user_id": "12345678901.99",
+  "corban_id": 7,
+  "tipo": "CONSULTA"
+}
