@@ -13,3 +13,9 @@ wheels/
 .env
 *.db
 .pytest_cache/
+
+# Ferramentas de qualidade
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
