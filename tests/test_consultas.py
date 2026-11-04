@@ -1,19 +1,17 @@
 """Testes dos webhooks de consulta."""
 
-from __future__ import annotations
-
 from typing import Any
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from granatech_webhook.enums import (
+from granatech_webhook.db.models import Consulta, EventoWebhook
+from granatech_webhook.web.api.webhooks.constants import (
     CONSULTA_STATUS_DESCRICOES,
     CONSULTA_STATUS_FINAIS,
 )
-from granatech_webhook.models import Consulta, EventoWebhook
 
 CONSULTAS = [
     ("AWAITING_CLIENT_AUTHORIZATION", False),
@@ -26,9 +24,10 @@ CONSULTAS = [
 ]
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize(("status", "final"), CONSULTAS)
-def test_consulta_por_status(
-    client: TestClient,
+async def test_consulta_por_status(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
     status: str,
@@ -36,7 +35,7 @@ def test_consulta_por_status(
 ) -> None:
     payload = load_payload(f"consulta_{status}.json")
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     corpo = resposta.json()
@@ -67,15 +66,16 @@ def test_consulta_por_status(
         assert evento.erro is None
 
 
-def test_cpf_com_zero_a_esquerda_preservado(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_cpf_com_zero_a_esquerda_preservado(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_PENDING.json")
     assert payload["cpf"].startswith("0")
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200
     with session_factory() as db:
@@ -84,15 +84,16 @@ def test_cpf_com_zero_a_esquerda_preservado(
         assert consulta.cpf == "01234567890"
 
 
-def test_user_id_permanece_string(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_user_id_permanece_string(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
     payload["user_id"] = "12500542068.38"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200
     with session_factory() as db:
@@ -102,8 +103,9 @@ def test_user_id_permanece_string(
         assert isinstance(consulta.user_id, str)
 
 
-def test_status_desconhecido_e_aceito(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_status_desconhecido_e_aceito(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
     caplog: pytest.LogCaptureFixture,
@@ -111,7 +113,7 @@ def test_status_desconhecido_e_aceito(
     payload = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
     payload["status"] = "STATUS_NOVO_QUALQUER"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     assert resposta.json()["duplicado"] is False
@@ -129,21 +131,20 @@ def test_status_desconhecido_e_aceito(
     assert "desconhecido" in caplog.text
 
 
-def test_payload_sem_campo_obrigatorio_grava_evento(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_payload_sem_campo_obrigatorio_grava_evento(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
     del payload["cpf"]
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 422
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.processado is False
         assert evento.status_conhecido is False
@@ -151,27 +152,24 @@ def test_payload_sem_campo_obrigatorio_grava_evento(
         assert "cpf" in evento.erro
         assert evento.payload == payload
         assert db.get(Consulta, payload["id_solicitacao"]) is None
-        total_eventos = db.scalar(
-            select(func.count()).select_from(EventoWebhook)
-        )
+        total_eventos = db.scalar(select(func.count()).select_from(EventoWebhook))
         assert total_eventos == 1
 
 
-def test_tipo_desconhecido_grava_evento(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_tipo_desconhecido_grava_evento(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
     payload["tipo"] = "OUTRO_EVENTO"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 422
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.tipo == "outro_evento"
         assert evento.processado is False
@@ -179,33 +177,33 @@ def test_tipo_desconhecido_grava_evento(
         assert evento.payload == payload
 
 
-def test_tipo_ausente_grava_evento(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_tipo_ausente_grava_evento(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
     del payload["tipo"]
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 422
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.tipo is None
         assert evento.processado is False
         assert "tipo" in (evento.erro or "")
 
 
-def test_json_malformado_responde_400(
-    client: TestClient, session_factory: sessionmaker[Session]
+@pytest.mark.anyio
+async def test_json_malformado_responde_400(
+    client: httpx.AsyncClient, session_factory: sessionmaker[Session]
 ) -> None:
     corpo_invalido = b'{"id_solicitacao": "x", '
 
-    resposta = client.post(
+    resposta = await client.post(
         "/webhooks/granatech",
         content=corpo_invalido,
         headers={"Content-Type": "application/json"},
@@ -213,24 +211,23 @@ def test_json_malformado_responde_400(
 
     assert resposta.status_code == 400
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.processado is False
         assert evento.erro == "JSON malformado"
         assert evento.payload["_raw"] == corpo_invalido.decode()
 
 
-def test_payload_duplicado_nao_reprocessa(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_payload_duplicado_nao_reprocessa(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     payload = load_payload("consulta_SUCCESS.json")
 
-    primeira = client.post("/webhooks/granatech", json=payload)
-    segunda = client.post("/webhooks/granatech", json=payload)
+    primeira = await client.post("/webhooks/granatech", json=payload)
+    segunda = await client.post("/webhooks/granatech", json=payload)
 
     assert primeira.status_code == 200
     assert segunda.status_code == 200
@@ -239,18 +236,15 @@ def test_payload_duplicado_nao_reprocessa(
     assert segunda.json()["evento_id"] == primeira.json()["evento_id"]
 
     with session_factory() as db:
-        total_consultas = db.scalar(
-            select(func.count()).select_from(Consulta)
-        )
-        total_eventos = db.scalar(
-            select(func.count()).select_from(EventoWebhook)
-        )
+        total_consultas = db.scalar(select(func.count()).select_from(Consulta))
+        total_eventos = db.scalar(select(func.count()).select_from(EventoWebhook))
         assert total_consultas == 1
         assert total_eventos == 1
 
 
-def test_campos_extras_ficam_no_evento_bruto(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_campos_extras_ficam_no_evento_bruto(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -258,7 +252,7 @@ def test_campos_extras_ficam_no_evento_bruto(
     payload["campo_novo"] = {"origem": "granatech", "versao": 2}
     payload["outro_campo"] = "valor livre"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200
     with session_factory() as db:
@@ -271,41 +265,40 @@ def test_campos_extras_ficam_no_evento_bruto(
         assert evento.payload["outro_campo"] == "valor livre"
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("tipo", ["CONSULTA", "consulta", "Consulta"])
-def test_tipo_consulta_case_insensitive(
-    client: TestClient, load_payload: Any, tipo: str
+async def test_tipo_consulta_case_insensitive(
+    client: httpx.AsyncClient, load_payload: Any, tipo: str
 ) -> None:
     payload = load_payload("consulta_PROCESSING.json")
     payload["tipo"] = tipo
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     assert resposta.json()["duplicado"] is False
 
 
-def test_alias_consultas_forca_tipo(
-    client: TestClient, load_payload: Any
-) -> None:
+@pytest.mark.anyio
+async def test_alias_consultas_forca_tipo(client: httpx.AsyncClient, load_payload: Any) -> None:
     payload = load_payload("consulta_PROCESSING.json")
     payload.pop("tipo")
 
-    resposta = client.post("/webhooks/granatech/consultas", json=payload)
+    resposta = await client.post("/webhooks/granatech/consultas", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     assert resposta.json()["duplicado"] is False
 
 
-def test_corpo_json_que_nao_e_objeto(
-    client: TestClient, session_factory: sessionmaker[Session]
+@pytest.mark.anyio
+async def test_corpo_json_que_nao_e_objeto(
+    client: httpx.AsyncClient, session_factory: sessionmaker[Session]
 ) -> None:
-    resposta = client.post("/webhooks/granatech", json=["nao", "e", "objeto"])
+    resposta = await client.post("/webhooks/granatech", json=["nao", "e", "objeto"])
 
     assert resposta.status_code == 422
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.processado is False
         assert evento.payload == ["nao", "e", "objeto"]

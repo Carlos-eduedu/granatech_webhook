@@ -1,24 +1,25 @@
 """Ambiente do Alembic para SQLite (testes) e PostgreSQL (produção)."""
 
-from __future__ import annotations
-
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from granatech_webhook import models as _models  # noqa: F401 - registra tabelas
-from granatech_webhook.config import get_settings
-from granatech_webhook.database import Base
+from granatech_webhook.db import models as _models  # noqa: F401 - registra tabelas
+from granatech_webhook.db.base import Base
+from granatech_webhook.settings import get_settings
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-settings = get_settings()
+# A URL pode vir do -c/alembic.ini ou de DATABASE_URL. Isso permite que o
+# entrypoint (`migrate.py`) passe a URL explicitamente e que a CLI use o env.
+url_configurada = config.get_main_option("sqlalchemy.url") or ""
+database_url = url_configurada or get_settings().database_url
 # ConfigParser interpola "%": senhas codificadas na URL podem conter "%".
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

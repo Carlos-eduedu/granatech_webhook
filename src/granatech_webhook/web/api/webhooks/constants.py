@@ -4,8 +4,6 @@ Não são usados como enums rígidos nos schemas: a Granatech pode criar status
 novos e o webhook deve continuar aceitando o payload.
 """
 
-from __future__ import annotations
-
 # ---------------------------------------------------------------------------
 # Consultas
 # ---------------------------------------------------------------------------
@@ -101,3 +99,5 @@ PROPOSTA_EVENTOS_DESCRICOES: dict[tuple[str, str], str] = {
 PROPOSTA_STATUS_FINAIS: frozenset[str] = frozenset({"PAYED", "CANCELED", "REPROVED"})
 
 TIPOS_CONHECIDOS: frozenset[str] = frozenset({"consulta", "proposta"})
+
+PREFIXO_ERRO_PROCESSAMENTO = "erro ao processar:"

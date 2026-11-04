@@ -1,23 +1,21 @@
 """Testes dos webhooks de proposta."""
 
-from __future__ import annotations
-
 from typing import Any
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from granatech_webhook.enums import (
-    PROPOSTA_EVENTOS_DESCRICOES,
-    PROPOSTA_STATUS_FINAIS,
-)
-from granatech_webhook.models import (
+from granatech_webhook.db.models import (
     Consulta,
     EventoWebhook,
     Proposta,
     PropostaHistorico,
+)
+from granatech_webhook.web.api.webhooks.constants import (
+    PROPOSTA_EVENTOS_DESCRICOES,
+    PROPOSTA_STATUS_FINAIS,
 )
 
 PROPOSTAS = [
@@ -43,9 +41,10 @@ def _nome_fixture(status: str, notificacao: str) -> str:
     return f"proposta_{status}__{notificacao}.json"
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize(("status", "notificacao"), PROPOSTAS)
-def test_proposta_por_combinacao(
-    client: TestClient,
+async def test_proposta_por_combinacao(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
     status: str,
@@ -53,7 +52,7 @@ def test_proposta_por_combinacao(
 ) -> None:
     payload = load_payload(_nome_fixture(status, notificacao))
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     corpo = resposta.json()
@@ -66,17 +65,12 @@ def test_proposta_por_combinacao(
         assert proposta.status_da_proposta == status
         assert proposta.tipo_notificacao == notificacao
         assert proposta.informacoes == payload["informacoes"]
-        assert (
-            proposta.status_descricao
-            == PROPOSTA_EVENTOS_DESCRICOES[(status, notificacao)]
-        )
+        assert proposta.status_descricao == PROPOSTA_EVENTOS_DESCRICOES[(status, notificacao)]
         assert proposta.status_final is (status in PROPOSTA_STATUS_FINAIS)
         assert proposta.ultimo_evento_id == corpo["evento_id"]
 
         historico = db.scalars(
-            select(PropostaHistorico).where(
-                PropostaHistorico.id_proposta == payload["id_proposta"]
-            )
+            select(PropostaHistorico).where(PropostaHistorico.id_proposta == payload["id_proposta"])
         ).all()
         assert len(historico) == 1
         assert historico[0].status_da_proposta == status
@@ -91,8 +85,9 @@ def test_proposta_por_combinacao(
         assert evento.payload == payload
 
 
-def test_sequencia_completa_ate_pago(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_sequencia_completa_ate_pago(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -106,7 +101,7 @@ def test_sequencia_completa_ate_pago(
 
     for status, notificacao in sequencia:
         payload = load_payload(_nome_fixture(status, notificacao))
-        resposta = client.post("/webhooks/granatech", json=payload)
+        resposta = await client.post("/webhooks/granatech", json=payload)
         assert resposta.status_code == 200, resposta.text
         assert resposta.json()["duplicado"] is False
 
@@ -132,22 +127,19 @@ def test_sequencia_completa_ate_pago(
         ]
 
 
-def test_idas_e_voltas_nao_sao_rejeitadas(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_idas_e_voltas_nao_sao_rejeitadas(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
-    banco = load_payload(
-        _nome_fixture("PENDING_BANK_ANALYSIS", "AGUARDANDO_ANALISE_BANCO")
-    )
-    pagamento = load_payload(
-        _nome_fixture("PENDING_PAYMENT", "SUCESSO_SEGURANCA_IDENTIDADE")
-    )
+    banco = load_payload(_nome_fixture("PENDING_BANK_ANALYSIS", "AGUARDANDO_ANALISE_BANCO"))
+    pagamento = load_payload(_nome_fixture("PENDING_PAYMENT", "SUCESSO_SEGURANCA_IDENTIDADE"))
     banco_de_novo = {**banco, "informacoes": "Banco pediu nova análise"}
     reprovado = load_payload(_nome_fixture("REPROVED", "REPROVADO"))
 
     for payload in (banco, pagamento, banco_de_novo, reprovado):
-        resposta = client.post("/webhooks/granatech", json=payload)
+        resposta = await client.post("/webhooks/granatech", json=payload)
         assert resposta.status_code == 200, resposta.text
         assert resposta.json()["duplicado"] is False
 
@@ -164,8 +156,9 @@ def test_idas_e_voltas_nao_sao_rejeitadas(
         assert total == 4
 
 
-def test_evento_apos_status_final_gera_warning(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_evento_apos_status_final_gera_warning(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
     caplog: pytest.LogCaptureFixture,
@@ -173,10 +166,10 @@ def test_evento_apos_status_final_gera_warning(
     pago = load_payload(_nome_fixture("PAYED", "PAGO"))
     cancelado = load_payload(_nome_fixture("CANCELED", "PROPOSTA_CANCELADA"))
 
-    assert client.post("/webhooks/granatech", json=pago).status_code == 200
+    assert (await client.post("/webhooks/granatech", json=pago)).status_code == 200
     caplog.clear()
     caplog.set_level("WARNING")
-    resposta = client.post("/webhooks/granatech", json=cancelado)
+    resposta = await client.post("/webhooks/granatech", json=cancelado)
 
     assert resposta.status_code == 200
     assert "após status final" in caplog.text
@@ -187,17 +180,16 @@ def test_evento_apos_status_final_gera_warning(
         assert proposta.status_final is True
 
 
-def test_payload_duplicado_nao_cria_historico(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_payload_duplicado_nao_cria_historico(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
-    payload = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    payload = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
 
-    primeira = client.post("/webhooks/granatech", json=payload)
-    segunda = client.post("/webhooks/granatech", json=payload)
+    primeira = await client.post("/webhooks/granatech", json=payload)
+    segunda = await client.post("/webhooks/granatech", json=payload)
 
     assert primeira.status_code == 200
     assert segunda.status_code == 200
@@ -211,24 +203,21 @@ def test_payload_duplicado_nao_cria_historico(
             .where(PropostaHistorico.id_proposta == payload["id_proposta"])
         )
         assert total == 1
-        total_eventos = db.scalar(
-            select(func.count()).select_from(EventoWebhook)
-        )
+        total_eventos = db.scalar(select(func.count()).select_from(EventoWebhook))
         assert total_eventos == 1
 
 
-def test_status_desconhecido_de_proposta_e_aceito(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_status_desconhecido_de_proposta_e_aceito(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
-    payload = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    payload = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     payload["status_da_proposta"] = "STATUS_NOVO_QUALQUER"
     payload["tipo_notificacao"] = "NOTIFICACAO_NOVA"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200
     with session_factory() as db:
@@ -244,19 +233,18 @@ def test_status_desconhecido_de_proposta_e_aceito(
         assert evento.status_conhecido is False
 
 
-def test_cpf_da_consulta_preenche_proposta(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_cpf_da_consulta_preenche_proposta(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
     consulta = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
-    proposta = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    proposta = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     assert consulta["id_proposta"] == proposta["id_proposta"]
 
-    assert client.post("/webhooks/granatech", json=consulta).status_code == 200
-    assert client.post("/webhooks/granatech", json=proposta).status_code == 200
+    assert (await client.post("/webhooks/granatech", json=consulta)).status_code == 200
+    assert (await client.post("/webhooks/granatech", json=proposta)).status_code == 200
 
     with session_factory() as db:
         registro = db.get(Proposta, proposta["id_proposta"])
@@ -264,23 +252,22 @@ def test_cpf_da_consulta_preenche_proposta(
         assert registro.cpf == consulta["cpf"]
 
 
-def test_consulta_preenche_proposta_ja_criada(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_consulta_preenche_proposta_ja_criada(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
-    proposta = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    proposta = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     consulta = load_payload("consulta_AWAITING_CLIENT_AUTHORIZATION.json")
 
-    assert client.post("/webhooks/granatech", json=proposta).status_code == 200
+    assert (await client.post("/webhooks/granatech", json=proposta)).status_code == 200
     with session_factory() as db:
         registro = db.get(Proposta, proposta["id_proposta"])
         assert registro is not None
         assert registro.cpf is None
 
-    assert client.post("/webhooks/granatech", json=consulta).status_code == 200
+    assert (await client.post("/webhooks/granatech", json=consulta)).status_code == 200
 
     with session_factory() as db:
         registro = db.get(Proposta, proposta["id_proposta"])
@@ -290,8 +277,9 @@ def test_consulta_preenche_proposta_ja_criada(
         assert consulta_db is not None
 
 
-def test_campos_extras_em_proposta(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_campos_extras_em_proposta(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -299,7 +287,7 @@ def test_campos_extras_em_proposta(
     payload["novo_campo"] = {"a": [1, 2, 3]}
     payload["timestamp_banco"] = "2026-11-04T12:00:00Z"
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200
     with session_factory() as db:
@@ -309,51 +297,44 @@ def test_campos_extras_em_proposta(
         assert evento.payload["timestamp_banco"] == "2026-11-04T12:00:00Z"
 
 
+@pytest.mark.anyio
 @pytest.mark.parametrize("tipo", ["proposta", "PROPOSTA", "Proposta"])
-def test_tipo_proposta_case_insensitive(
-    client: TestClient, load_payload: Any, tipo: str
+async def test_tipo_proposta_case_insensitive(
+    client: httpx.AsyncClient, load_payload: Any, tipo: str
 ) -> None:
-    payload = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    payload = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     payload["tipo"] = tipo
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 200, resposta.text
     assert resposta.json()["duplicado"] is False
 
 
-def test_alias_propostas_forca_tipo(
-    client: TestClient, load_payload: Any
-) -> None:
-    payload = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+@pytest.mark.anyio
+async def test_alias_propostas_forca_tipo(client: httpx.AsyncClient, load_payload: Any) -> None:
+    payload = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     payload.pop("tipo")
 
-    resposta = client.post("/webhooks/granatech/propostas", json=payload)
+    resposta = await client.post("/webhooks/granatech/propostas", json=payload)
 
     assert resposta.status_code == 200, resposta.text
 
 
-def test_proposta_sem_campo_obrigatorio_grava_evento(
-    client: TestClient,
+@pytest.mark.anyio
+async def test_proposta_sem_campo_obrigatorio_grava_evento(
+    client: httpx.AsyncClient,
     load_payload: Any,
     session_factory: sessionmaker[Session],
 ) -> None:
-    payload = load_payload(
-        _nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO")
-    )
+    payload = load_payload(_nome_fixture("PENDING_CONFIRMATION", "AGUARDANDO_CONFIRMACAO"))
     del payload["id_proposta"]
 
-    resposta = client.post("/webhooks/granatech", json=payload)
+    resposta = await client.post("/webhooks/granatech", json=payload)
 
     assert resposta.status_code == 422
     with session_factory() as db:
-        evento = db.scalars(
-            select(EventoWebhook).order_by(EventoWebhook.id.desc())
-        ).first()
+        evento = db.scalars(select(EventoWebhook).order_by(EventoWebhook.id.desc())).first()
         assert evento is not None
         assert evento.processado is False
         assert "id_proposta" in (evento.erro or "")

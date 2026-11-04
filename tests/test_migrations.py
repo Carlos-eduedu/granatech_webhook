@@ -1,7 +1,5 @@
 """As migrações sobem, descem e batem com os models (SQLite)."""
 
-from __future__ import annotations
-
 import os
 import subprocess
 import sys
@@ -38,6 +36,5 @@ def test_upgrade_downgrade_upgrade_e_check(tmp_path: Path) -> None:
     for comando in comandos:
         resultado = _alembic(env, *comando)
         assert resultado.returncode == 0, (
-            f"alembic {' '.join(comando)} falhou:\n"
-            f"{resultado.stdout}\n{resultado.stderr}"
+            f"alembic {' '.join(comando)} falhou:\n{resultado.stdout}\n{resultado.stderr}"
         )

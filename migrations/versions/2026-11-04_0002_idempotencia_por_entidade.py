@@ -5,8 +5,6 @@ Revises: 0001_baseline
 Create Date: 2026-11-04
 
 """
-from __future__ import annotations
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa

@@ -1,43 +1,14 @@
-"""Schemas Pydantic v2 dos payloads da Granatech."""
+"""Schemas Pydantic v2 dos payloads e das respostas do webhook."""
 
-from __future__ import annotations
+from pydantic import BaseModel, ConfigDict, field_validator
 
-import logging
-import re
-import uuid
-
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
-
-logger = logging.getLogger(__name__)
-
-_NAO_DIGITOS = re.compile(r"\D")
+from .utils import normalizar_cpf, normalizar_uuid_tolerante
 
 
 class PayloadGranatech(BaseModel):
     """Base tolerante: campos novos não quebram o recebimento."""
 
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
-
-
-def normalizar_uuid_tolerante(valor: str, campo: str) -> str:
-    """Valida o UUID de forma tolerante; se inválido, mantém a string e avisa."""
-    try:
-        uuid.UUID(valor)
-    except (ValueError, AttributeError, TypeError):
-        logger.warning(
-            "campo %s não é um UUID válido; mantendo como string", campo
-        )
-    return valor
-
-
-def normalizar_cpf(valor: str) -> str:
-    """Remove pontuação e preserva zeros à esquerda (completa com zfill)."""
-    digitos = _NAO_DIGITOS.sub("", valor)
-    if not digitos:
-        raise ValueError("CPF vazio")
-    if len(digitos) > 11:
-        raise ValueError("CPF com mais de 11 dígitos")
-    return digitos.zfill(11)
 
 
 class ConsultaPayload(PayloadGranatech):
@@ -108,12 +79,17 @@ class PropostaPayload(PayloadGranatech):
         return valor.lower()
 
 
-def resumir_erros_validacao(exc: ValidationError) -> str:
-    """Resume os erros sem incluir os valores de entrada (evita vazar CPF)."""
-    partes: list[str] = []
-    for erro in exc.errors():
-        local = ".".join(str(parte) for parte in erro.get("loc", ()))
-        mensagem = str(erro.get("msg", "valor inválido"))
-        partes.append(f"{local}: {mensagem}" if local else mensagem)
-    resumo = "; ".join(partes) or "payload inválido"
-    return resumo[:2000]
+class RespostaWebhook(BaseModel):
+    """Corpo de sucesso, mantido igual ao contrato antigo."""
+
+    recebido: bool = True
+    evento_id: int
+    duplicado: bool
+
+
+class RespostaErro(BaseModel):
+    """Formato dos erros de negócio."""
+
+    detail: str
+    evento_id: int | None = None
+    erro: str | None = None

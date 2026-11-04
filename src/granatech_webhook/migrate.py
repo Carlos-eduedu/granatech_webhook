@@ -5,8 +5,6 @@ Funciona com bancos novos (``upgrade head``) e com bancos criados pelo
 faz-se ``stamp 0001_baseline`` antes do ``upgrade head``.
 """
 
-from __future__ import annotations
-
 import logging
 import sys
 from pathlib import Path
@@ -16,7 +14,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 
-from .config import get_settings
+from .settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +57,7 @@ def main() -> None:
     )
     settings = get_settings()
     config = _config()
-    config.set_main_option(
-        "sqlalchemy.url", settings.database_url.replace("%", "%%")
-    )
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     try:

@@ -1,10 +1,8 @@
 """Testes da configuração (normalização de URL e variáveis de ambiente)."""
 
-from __future__ import annotations
-
 import pytest
 
-from granatech_webhook.config import (
+from granatech_webhook.settings import (
     DATABASE_URL_PADRAO,
     Settings,
     normalizar_database_url,
