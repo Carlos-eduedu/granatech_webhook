@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -41,13 +41,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["webhooks"])
 
 
-async def corpo_bruto(request: Request) -> bytes:
-    """Lê o corpo no event loop (assíncrono).
+async def corpo_bruto(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> bytes:
+    """Lê o corpo no event loop (assíncrono), com limite de tamanho.
 
     As rotas são síncronas para que o acesso síncrono ao SQLAlchemy rode no
     threadpool do FastAPI e não bloqueie o event loop.
     """
-    return await request.body()
+    limite = max(0, settings.max_body_bytes)
+    corpo = bytearray()
+    async for parte in request.stream():
+        corpo.extend(parte)
+        if len(corpo) > limite:
+            raise HTTPException(status_code=413, detail="corpo muito grande")
+    return bytes(corpo)
 
 
 def _normalizar_tipo(valor: object) -> str | None:

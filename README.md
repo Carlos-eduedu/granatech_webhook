@@ -10,12 +10,13 @@ envia WhatsApp e não possui front-end.
 - Python 3.15
 - FastAPI + Pydantic v2
 - SQLAlchemy 2.x (`Mapped`/`mapped_column`, sessão síncrona)
+- Alembic para migrações
 - SQLite local/testes e PostgreSQL em produção (`psycopg` 3)
 - `uv` para dependências, execução e lock (`uv.lock` versionado)
 
-Sem Alembic: as tabelas são criadas com `Base.metadata.create_all()` no startup
-(idempotente). Mantenha **1 réplica** no Dokploy para evitar corrida na criação
-das tabelas.
+As tabelas são criadas/atualizadas por migrações do Alembic. O entrypoint do
+container roda `alembic upgrade head` antes do uvicorn (com `stamp` automático
+em bancos criados pela versão antiga, que usava `create_all()`).
 
 ## Estrutura
 
@@ -91,6 +92,7 @@ diretório corrente). Em produção use sempre PostgreSQL.
 | `TRUST_PROXY` | `false` | `true` atrás do Traefik: usa o **primeiro** IP de `X-Forwarded-For`. |
 | `APP_ENV` | `development` | Em `production` sem token, loga um WARNING no startup. |
 | `LOG_LEVEL` | `INFO` | Nível de log (stdout). |
+| `MAX_BODY_BYTES` | `262144` | Limite do corpo em bytes. Acima disso: `413` e o evento **não** é gravado. |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Usados por `uv run granatech-webhook`. |
 
 O IP gravado em `ip_origem` e o usado em `ALLOWED_IPS` vêm da mesma função:
@@ -127,8 +129,21 @@ O campo `tipo` é comparado sem diferenciar maiúsculas/minúsculas (`CONSULTA`,
 - Status desconhecido: `200`, gravado normalmente, com
   `status_conhecido=false` e WARNING no log. Status novos não quebram o webhook.
 
-A idempotência usa SHA-256 do JSON canonizado (`sort_keys=True`) no
-`payload_hash` (índice único).
+### Idempotência
+
+O `payload_hash` é o SHA-256 do JSON canonizado (`sort_keys=True`). Ele **não**
+é mais único globalmente: a deduplicação é feita por entidade
+(`consulta:<id_solicitacao>` ou `proposta:<id_proposta>`).
+
+- O mesmo payload enviado duas vezes seguidas é retentativa: responde `200` com
+  `duplicado=true` e não cria histórico novo.
+- Se o payload for diferente do **último** evento da entidade, é um evento novo,
+  mesmo que já tenha existido um payload igual no passado. Isso preserva as
+  "idas e voltas" de status documentadas pela Granatech.
+- Se o último evento da entidade falhou no **processamento** (`500`), o reenvio
+  idêntico reprocessa o mesmo evento e responde `duplicado=false`.
+- Eventos sem entidade (JSON malformado, `tipo` desconhecido, falha de
+  validação) continuam deduplicados pelo hash.
 
 ## Payloads
 
@@ -210,7 +225,11 @@ curl -X POST https://SEU-DOMINIO/webhooks/granatech/propostas \
   --data @tests/fixtures/proposta_PAYED__PAGO.json
 ```
 
-Com token na query string (para parceiros que só configuram URL):
+> **Recomendação:** prefira sempre o token no header. A URL com `?token=`
+> pode aparecer em logs do Traefik/Dokploy. O suporte à query string existe
+> apenas para parceiros que só conseguem configurar a URL.
+
+Com token na query string:
 
 ```bash
 curl -X POST "https://SEU-DOMINIO/webhooks/granatech?token=SEU_TOKEN" \
@@ -285,8 +304,9 @@ O Dokploy usa Application com **Build Type: Dockerfile**, Traefik na frente
 2. Em **Build Type**, escolha **Dockerfile**.
 3. Dockerfile Path: `Dockerfile`; Docker Context Path: `.`.
 4. Exponha a porta **8000** do container no roteamento/domínio.
-5. Mantenha **1 réplica** (a criação de tabelas no startup não deve correr em
-   paralelo).
+5. O entrypoint aplica as migrações antes de subir o uvicorn. Em um primeiro
+   deploy contra o banco antigo, ele faz `stamp 0001_baseline` automaticamente
+   e depois `upgrade head`.
 
 ### 3. Variáveis de ambiente da Application
 
@@ -299,6 +319,8 @@ WEBHOOK_TOKEN_HEADER=X-Webhook-Token
 # ALLOWED_IPS=203.0.113.10,203.0.113.11
 DATABASE_URL=<Internal Connection URL do PostgreSQL do Dokploy>
 LOG_LEVEL=INFO
+# opcional: limite do corpo em bytes (padrão 262144 = 256 KB)
+# MAX_BODY_BYTES=262144
 ```
 
 Sem `WEBHOOK_TOKEN` em produção, o startup loga um WARNING bem visível porque o
@@ -350,9 +372,9 @@ https://SEU-DOMINIO/webhooks/granatech/consultas
 https://SEU-DOMINIO/webhooks/granatech/propostas
 ```
 
-Envie também o token combinado no header configurado, ou use
-`https://SEU-DOMINIO/webhooks/granatech?token=SEU_TOKEN` se o parceiro permitir
-apenas configurar a URL.
+Envie o token combinado **no header** configurado. A URL com
+`?token=SEU_TOKEN` continua funcionando como compatibilidade, mas não é
+recomendada porque pode vazar em logs do Traefik/Dokploy.
 
 ## LGPD e logs
 

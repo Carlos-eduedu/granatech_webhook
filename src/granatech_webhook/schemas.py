@@ -88,7 +88,14 @@ class PropostaPayload(PayloadGranatech):
     status_da_proposta: str
     tipo_notificacao: str
     id_proposta: str
-    informacoes: str
+    informacoes: str = ""
+
+    @field_validator("informacoes", mode="before")
+    @classmethod
+    def _informacoes_tolerante(cls, valor: object) -> object:
+        if valor is None:
+            return ""
+        return valor
 
     @field_validator("id_proposta")
     @classmethod

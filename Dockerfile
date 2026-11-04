@@ -21,6 +21,11 @@ COPY README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+# Migrações e entrypoint usados em runtime.
+COPY alembic.ini ./
+COPY migrations ./migrations
+COPY scripts ./scripts
+
 # ---------------------------------------------------------------------------
 # Runtime: apenas o venv e o código, rodando como usuário não-root.
 # ---------------------------------------------------------------------------
@@ -38,6 +43,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --from=builder --chown=appuser:appuser /app/src /app/src
 COPY --from=builder --chown=appuser:appuser /app/README.md /app/README.md
+COPY --from=builder --chown=appuser:appuser /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=appuser:appuser /app/migrations /app/migrations
+COPY --from=builder --chown=appuser:appuser /app/scripts /app/scripts
+
+RUN chmod +x /app/scripts/entrypoint.sh
 
 USER appuser
 
@@ -46,5 +56,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)"
 
-# Forma shell para expandir PORT em runtime (Dokploy pode injetar outra porta).
-CMD uvicorn granatech_webhook.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips="*" --no-access-log
+# O entrypoint aplica as migrações antes de subir o uvicorn.
+CMD ["/app/scripts/entrypoint.sh"]

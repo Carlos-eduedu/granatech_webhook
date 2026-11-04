@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from . import models as _models  # noqa: F401 - registra as tabelas no metadata
 from .config import Settings, get_settings
-from .database import Base, engine, get_db
+from .database import get_db
 from .routers import webhooks
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,6 @@ async def lifespan(app: FastAPI) -> Any:
             "O endpoint POST /webhooks/granatech está público na internet."
         )
 
-    Base.metadata.create_all(bind=engine)
     logger.info(
         "webhook Granatech iniciado app_env=%s banco=%s",
         settings.app_env,
@@ -63,7 +62,8 @@ async def lifespan(app: FastAPI) -> Any:
         logger.info("webhook Granatech encerrado")
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
     app = FastAPI(
         title="Granatech Webhook",
         description=(
@@ -72,6 +72,9 @@ def create_app() -> FastAPI:
         ),
         version="0.1.0",
         lifespan=lifespan,
+        docs_url="/docs" if settings.exibir_docs else None,
+        redoc_url="/redoc" if settings.exibir_docs else None,
+        openapi_url="/openapi.json" if settings.exibir_docs else None,
     )
     app.include_router(webhooks.router)
 

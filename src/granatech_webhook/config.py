@@ -37,6 +37,15 @@ def _parse_lista(valor: str | None) -> list[str]:
     return [item.strip() for item in valor.split(",") if item.strip()]
 
 
+def _parse_inteiro(valor: str | None, padrao: int) -> int:
+    if valor is None:
+        return padrao
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return padrao
+
+
 class Settings(BaseModel):
     """Configuração da aplicação (sem pydantic-settings, só ``os.environ``)."""
 
@@ -49,6 +58,7 @@ class Settings(BaseModel):
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
+    max_body_bytes: int = 262144
 
     @field_validator("database_url")
     @classmethod
@@ -63,6 +73,15 @@ class Settings(BaseModel):
     @property
     def producao(self) -> bool:
         return self.app_env.strip().lower() == "production"
+
+    @property
+    def exibir_docs(self) -> bool:
+        """Documentação aberta apenas em ambientes não produtivos."""
+        return self.app_env.strip().lower() in {
+            "development",
+            "test",
+            "staging",
+        }
 
     @property
     def banco_postgres(self) -> bool:
@@ -89,6 +108,9 @@ class Settings(BaseModel):
             log_level=ambiente.get("LOG_LEVEL", "INFO").upper(),
             host=ambiente.get("HOST", "0.0.0.0"),
             port=porta,
+            max_body_bytes=_parse_inteiro(
+                ambiente.get("MAX_BODY_BYTES"), 262144
+            ),
         )
 
 
