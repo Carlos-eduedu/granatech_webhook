@@ -25,6 +25,9 @@ from ..security import (
     token_valido,
 )
 from ..services import (
+    ResultadoRegistro,
+    chave_entidade_consulta,
+    chave_entidade_proposta,
     hash_corpo_bytes,
     hash_payload,
     marcar_evento_falha,
@@ -83,8 +86,9 @@ def _registrar_ou_erro(
     headers: dict[str, str],
     payload: Any,
     payload_hash: str,
+    chave_entidade: str | None = None,
     erro: str | None = None,
-) -> tuple[Any, bool] | JSONResponse:
+) -> ResultadoRegistro | JSONResponse:
     """Grava o evento bruto; em falha de banco devolve uma resposta 500."""
     try:
         return registrar_evento(
@@ -95,6 +99,7 @@ def _registrar_ou_erro(
             headers=headers,
             payload=payload,
             payload_hash=payload_hash,
+            chave_entidade=chave_entidade,
             processado=False,
             erro=erro,
             status_conhecido=False,
@@ -168,14 +173,14 @@ async def _receber(
         )
         if isinstance(registrado, JSONResponse):
             return registrado
-        evento, duplicado = registrado
+        evento = registrado.evento
         logger.warning(
             "JSON malformado rota=%s ip=%s tamanho=%s evento_id=%s duplicado=%s",
             rota,
             ip_origem,
             len(body),
             evento.id,
-            "sim" if duplicado else "não",
+            "sim" if registrado.duplicado else "não",
         )
         return _resposta_erro(400, "JSON malformado", evento.id)
 
@@ -196,7 +201,7 @@ async def _receber(
         )
         if isinstance(registrado, JSONResponse):
             return registrado
-        evento, _duplicado = registrado
+        evento = registrado.evento
         logger.warning(
             "payload inválido rota=%s ip=%s erro=%s evento_id=%s",
             rota,
@@ -236,7 +241,7 @@ async def _receber(
         )
         if isinstance(registrado, JSONResponse):
             return registrado
-        evento, _duplicado = registrado
+        evento = registrado.evento
         logger.warning(
             "tipo desconhecido rota=%s ip=%s tipo=%s evento_id=%s",
             rota,
@@ -266,7 +271,7 @@ async def _receber(
         )
         if isinstance(registrado, JSONResponse):
             return registrado
-        evento, duplicado = registrado
+        evento = registrado.evento
         logger.warning(
             "payload inválido tipo=%s rota=%s ip=%s erro=%s evento_id=%s duplicado=%s",
             tipo,
@@ -274,7 +279,7 @@ async def _receber(
             ip_origem,
             resumo,
             evento.id,
-            "sim" if duplicado else "não",
+            "sim" if registrado.duplicado else "não",
         )
         return _resposta_erro(
             422, "payload inválido", evento.id, {"erro": resumo}
@@ -283,6 +288,17 @@ async def _receber(
     # ------------------------------------------------------------------
     # Grava o evento bruto (transação própria) antes de processar.
     # ------------------------------------------------------------------
+    if isinstance(payload, ConsultaPayload):
+        identificador = payload.id_solicitacao
+        status = payload.status
+        tipo_notificacao = None
+        chave_entidade = chave_entidade_consulta(identificador)
+    else:
+        identificador = payload.id_proposta
+        status = payload.status_da_proposta
+        tipo_notificacao = payload.tipo_notificacao
+        chave_entidade = chave_entidade_proposta(identificador)
+
     registrado = _registrar_ou_erro(
         db,
         tipo=tipo,
@@ -291,21 +307,13 @@ async def _receber(
         headers=headers,
         payload=dados,
         payload_hash=hash_payload(dados),
+        chave_entidade=chave_entidade,
     )
     if isinstance(registrado, JSONResponse):
         return registrado
-    evento, duplicado = registrado
+    evento = registrado.evento
 
-    if isinstance(payload, ConsultaPayload):
-        identificador = payload.id_solicitacao
-        status = payload.status
-        tipo_notificacao = None
-    else:
-        identificador = payload.id_proposta
-        status = payload.status_da_proposta
-        tipo_notificacao = payload.tipo_notificacao
-
-    if duplicado:
+    if registrado.duplicado:
         _log_evento(
             tipo, identificador, status, tipo_notificacao, evento.id, duplicado=True
         )

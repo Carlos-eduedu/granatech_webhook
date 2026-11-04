@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +29,22 @@ from .schemas import ConsultaPayload, PropostaPayload
 
 logger = logging.getLogger(__name__)
 
+PREFIXO_ERRO_PROCESSAMENTO = "erro ao processar:"
+
+
+@dataclass(frozen=True)
+class ResultadoRegistro:
+    """Resultado do registro do evento bruto.
+
+    ``duplicado`` indica que o evento é uma retentativa idêntica e não deve ser
+    processado. ``reprocessar`` indica que o evento existente falhou no
+    processamento (não na validação) e deve ser reaproveitado.
+    """
+
+    evento: EventoWebhook
+    duplicado: bool
+    reprocessar: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Utilitários
@@ -45,6 +62,14 @@ def hash_corpo_bytes(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
+def chave_entidade_consulta(id_solicitacao: str) -> str:
+    return f"consulta:{id_solicitacao}"[:255]
+
+
+def chave_entidade_proposta(id_proposta: str) -> str:
+    return f"proposta:{id_proposta}"[:255]
+
+
 def mascarar_cpf(cpf: str | None) -> str:
     """Retorna o CPF mascarado (``331.***.***-41``); nunca o valor completo."""
     if not cpf:
@@ -60,6 +85,52 @@ def mascarar_cpf(cpf: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _bloquear_entidade(db: Session, chave_entidade: str | None) -> None:
+    """Serializa requisições concorrentes da mesma entidade no PostgreSQL.
+
+    SQLite não suporta ``SELECT ... FOR UPDATE``; nele a serialização fica a
+    cargo da transação de escrita (e o volume de produção é PostgreSQL).
+    """
+    if not chave_entidade or db.bind is None or db.bind.dialect.name != "postgresql":
+        return
+
+    prefixo, _, identificador = chave_entidade.partition(":")
+    if not identificador:
+        return
+    if prefixo == "consulta":
+        db.execute(
+            select(Consulta)
+            .where(Consulta.id_solicitacao == identificador)
+            .with_for_update()
+        ).scalar_one_or_none()
+    elif prefixo == "proposta":
+        db.execute(
+            select(Proposta)
+            .where(Proposta.id_proposta == identificador)
+            .with_for_update()
+        ).scalar_one_or_none()
+
+
+def _falhou_no_processamento(evento: EventoWebhook) -> bool:
+    return bool(evento.erro and evento.erro.startswith(PREFIXO_ERRO_PROCESSAMENTO))
+
+
+def _ultimo_evento(db: Session, chave_entidade: str | None, payload_hash: str) -> EventoWebhook | None:
+    if chave_entidade is not None:
+        return db.scalar(
+            select(EventoWebhook)
+            .where(EventoWebhook.chave_entidade == chave_entidade)
+            .order_by(EventoWebhook.id.desc())
+            .limit(1)
+        )
+    return db.scalar(
+        select(EventoWebhook)
+        .where(EventoWebhook.payload_hash == payload_hash)
+        .order_by(EventoWebhook.id.desc())
+        .limit(1)
+    )
+
+
 def registrar_evento(
     db: Session,
     *,
@@ -69,20 +140,34 @@ def registrar_evento(
     headers: dict[str, str],
     payload: Any,
     payload_hash: str,
+    chave_entidade: str | None = None,
     processado: bool = False,
     erro: str | None = None,
     status_conhecido: bool = False,
-) -> tuple[EventoWebhook, bool]:
+) -> ResultadoRegistro:
     """Grava o evento bruto em transação própria.
 
-    Retorna ``(evento, duplicado)``. Se o hash já existir, devolve o evento
-    original sem reprocessar.
+    A deduplicação é por entidade: só é duplicado quando o **último** evento da
+    mesma consulta/proposta tem o mesmo hash. Sem entidade (JSON malformado,
+    ``tipo`` desconhecido, falha de validação), deduplica pelo hash global.
     """
-    existente = db.scalar(
-        select(EventoWebhook).where(EventoWebhook.payload_hash == payload_hash)
-    )
+    _bloquear_entidade(db, chave_entidade)
+
+    existente = _ultimo_evento(db, chave_entidade, payload_hash)
     if existente is not None:
-        return existente, True
+        if chave_entidade is None:
+            return ResultadoRegistro(existente, duplicado=True)
+        if existente.payload_hash == payload_hash:
+            if existente.processado:
+                return ResultadoRegistro(existente, duplicado=True)
+            if _falhou_no_processamento(existente):
+                return ResultadoRegistro(
+                    existente, duplicado=False, reprocessar=True
+                )
+            return ResultadoRegistro(existente, duplicado=True)
+        # O último evento da entidade é diferente: pode ser uma ida e volta
+        # (ex.: PENDING_BANK_ANALYSIS -> PENDING_PAYMENT -> PENDING_BANK_ANALYSIS).
+        # Grava como evento novo mesmo que o hash já exista no passado.
 
     evento = EventoWebhook(
         tipo=tipo,
@@ -91,6 +176,7 @@ def registrar_evento(
         headers=headers,
         payload=payload,
         payload_hash=payload_hash,
+        chave_entidade=chave_entidade,
         processado=processado,
         erro=erro,
         status_conhecido=status_conhecido,
@@ -99,17 +185,14 @@ def registrar_evento(
     try:
         db.commit()
     except IntegrityError:
-        # Corrida entre duas requisições idênticas: a outra já gravou.
         db.rollback()
-        existente = db.scalar(
-            select(EventoWebhook).where(EventoWebhook.payload_hash == payload_hash)
-        )
+        existente = _ultimo_evento(db, chave_entidade, payload_hash)
         if existente is not None:
-            return existente, True
+            return ResultadoRegistro(existente, duplicado=True)
         raise
 
     db.refresh(evento)
-    return evento, False
+    return ResultadoRegistro(evento, duplicado=False)
 
 
 def marcar_evento_falha(db: Session, evento_id: int, erro: str) -> None:

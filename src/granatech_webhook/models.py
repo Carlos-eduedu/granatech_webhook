@@ -38,8 +38,12 @@ class EventoWebhook(Base):
     ip_origem: Mapped[str | None] = mapped_column(String(128), nullable=True)
     headers: Mapped[dict[str, str]] = mapped_column(JSON, default=dict, nullable=False)
     payload: Mapped[Any] = mapped_column(JSON, nullable=False)
-    payload_hash: Mapped[str] = mapped_column(
-        String(64), unique=True, index=True, nullable=False
+    payload_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    # Entidade afetada pelo evento ("consulta:<id>" ou "proposta:<id>").
+    # Eventos sem entidade (JSON malformado, tipo desconhecido, validação)
+    # continuam deduplicados apenas pelo hash.
+    chave_entidade: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
     )
     processado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     erro: Mapped[str | None] = mapped_column(Text, nullable=True)
