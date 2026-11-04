@@ -41,6 +41,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["webhooks"])
 
 
+async def corpo_bruto(request: Request) -> bytes:
+    """Lê o corpo no event loop (assíncrono).
+
+    As rotas são síncronas para que o acesso síncrono ao SQLAlchemy rode no
+    threadpool do FastAPI e não bloqueie o event loop.
+    """
+    return await request.body()
+
+
 def _normalizar_tipo(valor: object) -> str | None:
     """Aceita ``CONSULTA``, ``consulta``, ``Proposta`` etc. (case-insensitive)."""
     if not isinstance(valor, str):
@@ -133,8 +142,9 @@ def _log_evento(
     )
 
 
-async def _receber(
+def _receber(
     request: Request,
+    body: bytes,
     db: Session,
     *,
     tipo_forcado: str | None,
@@ -151,7 +161,6 @@ async def _receber(
         logger.warning("IP não permitido rota=%s ip=%s", rota, ip_origem)
         return _resposta_erro(403, "IP não permitido")
 
-    body = await request.body()
     headers = headers_para_evento(request, settings)
 
     # ------------------------------------------------------------------
@@ -344,24 +353,30 @@ async def _receber(
 
 
 @router.post("/webhooks/granatech")
-async def webhook_granatech(
-    request: Request, db: Session = Depends(get_db)
+def webhook_granatech(
+    request: Request,
+    body: bytes = Depends(corpo_bruto),
+    db: Session = Depends(get_db),
 ) -> Any:
     """Endpoint único: identifica consulta/proposta pelo campo ``tipo``."""
-    return await _receber(request, db, tipo_forcado=None)
+    return _receber(request, body, db, tipo_forcado=None)
 
 
 @router.post("/webhooks/granatech/consultas")
-async def webhook_consultas(
-    request: Request, db: Session = Depends(get_db)
+def webhook_consultas(
+    request: Request,
+    body: bytes = Depends(corpo_bruto),
+    db: Session = Depends(get_db),
 ) -> Any:
     """Alias que força o tipo consulta."""
-    return await _receber(request, db, tipo_forcado="consulta")
+    return _receber(request, body, db, tipo_forcado="consulta")
 
 
 @router.post("/webhooks/granatech/propostas")
-async def webhook_propostas(
-    request: Request, db: Session = Depends(get_db)
+def webhook_propostas(
+    request: Request,
+    body: bytes = Depends(corpo_bruto),
+    db: Session = Depends(get_db),
 ) -> Any:
     """Alias que força o tipo proposta."""
-    return await _receber(request, db, tipo_forcado="proposta")
+    return _receber(request, body, db, tipo_forcado="proposta")
