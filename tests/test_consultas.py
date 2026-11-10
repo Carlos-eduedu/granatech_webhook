@@ -291,6 +291,62 @@ async def test_alias_consultas_forca_tipo(client: httpx.AsyncClient, load_payloa
 
 
 @pytest.mark.anyio
+async def test_payload_minimo_com_id_consulta(
+    client: httpx.AsyncClient, session_factory: sessionmaker[Session]
+) -> None:
+    payload = {
+        "id_consulta": "e8debef1-b568-4be2-8de9-7449624e8189",
+        "cpf": "00189004967",
+        "status": "AGUARDANDO_AUTORIZACAO_DO_CLIENTE",
+        "tipo": "CONSULTA",
+    }
+
+    resposta = await client.post("/webhooks/granatech", json=payload)
+
+    assert resposta.status_code == 200, resposta.text
+    with session_factory() as db:
+        consulta = db.get(Consulta, payload["id_consulta"])
+        assert consulta is not None
+        assert consulta.cpf == "00189004967"
+        assert consulta.user_id is None
+        assert consulta.corban_id is None
+        assert consulta.status_final is False
+        assert consulta.status_descricao == CONSULTA_STATUS_DESCRICOES[payload["status"]]
+
+        evento = db.get(EventoWebhook, resposta.json()["evento_id"])
+        assert evento is not None
+        assert evento.processado is True
+        assert evento.status_conhecido is True
+        assert evento.payload == payload
+
+
+@pytest.mark.anyio
+async def test_evento_minimo_nao_apaga_user_id_nem_corban_id(
+    client: httpx.AsyncClient,
+    load_payload: Any,
+    session_factory: sessionmaker[Session],
+) -> None:
+    completo = load_payload("consulta_PROCESSING.json")
+    assert (await client.post("/webhooks/granatech", json=completo)).status_code == 200
+
+    minimo = {
+        "id_consulta": completo["id_solicitacao"],
+        "cpf": completo["cpf"],
+        "status": "AGUARDANDO_AUTORIZACAO_DO_CLIENTE",
+        "tipo": "CONSULTA",
+    }
+    resposta = await client.post("/webhooks/granatech", json=minimo)
+
+    assert resposta.status_code == 200, resposta.text
+    with session_factory() as db:
+        consulta = db.get(Consulta, completo["id_solicitacao"])
+        assert consulta is not None
+        assert consulta.user_id == completo["user_id"]
+        assert consulta.corban_id == completo["corban_id"]
+        assert consulta.status == "AGUARDANDO_AUTORIZACAO_DO_CLIENTE"
+
+
+@pytest.mark.anyio
 async def test_corpo_json_que_nao_e_objeto(
     client: httpx.AsyncClient, session_factory: sessionmaker[Session]
 ) -> None:

@@ -164,22 +164,27 @@ UPDATE` durante a checagem de concorrência. No SQLite isso não é necessário.
 
 ```json
 {
-  "id_solicitacao": "a7e3587e-cd73-4998-bae3-ec000ab6bb6b",
-  "id_proposta": "6fdf2acb-cd75-416f-8754-3744e786a6a6",
-  "cpf": "33179781041",
-  "status": "AWAITING_CLIENT_AUTHORIZATION",
-  "user_id": "12500542068.38",
-  "corban_id": 38,
+  "id_consulta": "a7e3587e-cd73-4998-bae3-ec000ab6bb6b",
+  "cpf": "00189004967",
+  "status": "AGUARDANDO_AUTORIZACAO_DO_CLIENTE",
   "tipo": "CONSULTA"
 }
 ```
 
-Status conhecidos: `AWAITING_CLIENT_AUTHORIZATION`, `PROCESSING`, `SUCCESS`,
-`PENDING`, `NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
+O identificador pode vir como `id_consulta` (formato enviado pela Granatech) ou
+`id_solicitacao`; os dois viram a mesma chave `consulta:<id>`. `id_proposta`,
+`user_id` e `corban_id` são opcionais: campos ausentes ficam `NULL`, um evento
+posterior com o campo preenche o valor, e um evento mínimo **não apaga** o que
+já estava gravado.
+
+Status conhecidos: `AWAITING_CLIENT_AUTHORIZATION`,
+`AGUARDANDO_AUTORIZACAO_DO_CLIENTE`, `PROCESSING`, `SUCCESS`, `PENDING`,
+`NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
 Finais: `SUCCESS`, `NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
 
 O CPF é normalizado para apenas dígitos com `zfill(11)` (zeros à esquerda são
-preservados). `user_id` permanece **string**, exatamente como recebido.
+preservados). `user_id` permanece **string**, exatamente como recebido (quando
+presente).
 
 ### Proposta
 
@@ -400,12 +405,14 @@ Após o deploy, acompanhe os logs do container no Dokploy (tudo vai para stdout)
 O entrypoint executa `python -m granatech_webhook.migrate` antes do uvicorn. Ele
 detecta automaticamente o estado do banco:
 
-- **Banco vazio:** `alembic upgrade head` cria tudo (`0001_baseline` e
-  `0002_idempotencia_por_entidade`).
+- **Banco vazio:** `alembic upgrade head` cria tudo (`0001_baseline`,
+  `0002_idempotencia_por_entidade` e `0003_campos_opcionais_consulta`).
 - **Banco criado pela versão antiga** (tabelas existem, mas não existe
   `alembic_version`): faz `stamp 0001_baseline` e depois `upgrade head`. A
   migração `0002` adiciona `chave_entidade` e troca o índice UNIQUE de
-  `payload_hash` por um índice comum, **preservando os dados existentes**.
+  `payload_hash` por um índice comum, **preservando os dados existentes**. A
+  `0003` relaxa `user_id` e `corban_id` para `NULL` (evento mínimo de consulta),
+  sem alterar nenhuma linha.
 - **Banco já migrado:** `upgrade head` é no-op.
 
 Recomendações para o primeiro deploy:

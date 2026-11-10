@@ -12,6 +12,10 @@ CONSULTA_STATUS_DESCRICOES: dict[str, str] = {
     "AWAITING_CLIENT_AUTHORIZATION": (
         "Aguardando autorização do cliente (assinatura do termo de consentimento)"
     ),
+    # A Granatech também envia esse status em português.
+    "AGUARDANDO_AUTORIZACAO_DO_CLIENTE": (
+        "Aguardando autorização do cliente (assinatura do termo de consentimento)"
+    ),
     "PROCESSING": "Em processamento",
     "SUCCESS": "Concluída com sucesso",
     "PENDING": "Pendente",

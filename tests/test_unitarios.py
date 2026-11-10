@@ -205,7 +205,7 @@ def test_migrate_main_banco_novo(monkeypatch: pytest.MonkeyPatch, tmp_path: Any)
 
     migrate.main()
 
-    assert _versao(banco) == "0002_idempotencia_por_entidade"
+    assert _versao(banco) == "0003_campos_opcionais_consulta"
     engine = create_engine(f"sqlite:///{banco}")
     assert migrate.precisa_de_stamp(engine) is False
     engine.dispose()
@@ -229,7 +229,7 @@ def test_migrate_main_banco_criado_pelo_create_all(
 
     migrate.main()
 
-    assert _versao(banco) == "0002_idempotencia_por_entidade"
+    assert _versao(banco) == "0003_campos_opcionais_consulta"
 
 
 # ---------------------------------------------------------------------------

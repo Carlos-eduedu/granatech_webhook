@@ -221,8 +221,11 @@ def _processar_consulta_uma_vez(
         consulta_dao.adicionar(db, consulta)
     else:
         consulta.cpf = payload.cpf
-        consulta.user_id = payload.user_id
-        consulta.corban_id = payload.corban_id
+        # Campos opcionais: um evento mínimo não apaga o que já se sabe.
+        if payload.user_id is not None:
+            consulta.user_id = payload.user_id
+        if payload.corban_id is not None:
+            consulta.corban_id = payload.corban_id
         consulta.status = status
         consulta.status_descricao = descricao
         consulta.status_final = final

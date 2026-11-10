@@ -1,6 +1,6 @@
 """Schemas Pydantic v2 dos payloads e das respostas do webhook."""
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from .utils import normalizar_cpf, normalizar_uuid_tolerante
 
@@ -12,14 +12,21 @@ class PayloadGranatech(BaseModel):
 
 
 class ConsultaPayload(PayloadGranatech):
-    """Payload de consulta (status da solicitação de saldo/margem)."""
+    """Payload de consulta (status da solicitação de saldo/margem).
 
-    id_solicitacao: str
+    A Granatech envia o identificador como ``id_consulta``; ``id_solicitacao``
+    continua aceito para não quebrar quem já usa o contrato documentado.
+    ``user_id`` e ``corban_id`` não vêm em todos os eventos.
+    """
+
+    id_solicitacao: str = Field(
+        validation_alias=AliasChoices("id_solicitacao", "id_consulta"),
+    )
     id_proposta: str | None = None
     cpf: str
     status: str
-    user_id: str
-    corban_id: int
+    user_id: str | None = None
+    corban_id: int | None = None
     tipo: str
 
     @field_validator("id_solicitacao")

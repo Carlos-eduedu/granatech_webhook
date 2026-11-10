@@ -16,8 +16,9 @@ class Consulta(Base):
     id_solicitacao: Mapped[str] = mapped_column(String(255), primary_key=True)
     id_proposta: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     cpf: Mapped[str] = mapped_column(String(11), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    corban_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Nem todo evento de consulta traz esses campos (payload mínimo da Granatech).
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    corban_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(128), nullable=False)
     status_descricao: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
