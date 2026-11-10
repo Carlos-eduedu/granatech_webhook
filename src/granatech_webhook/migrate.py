@@ -50,12 +50,12 @@ def precisa_de_stamp(engine: Engine) -> bool:
 
 
 def main() -> None:
+    settings = get_settings()
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         stream=sys.stdout,
     )
-    settings = get_settings()
     config = _config()
     config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 

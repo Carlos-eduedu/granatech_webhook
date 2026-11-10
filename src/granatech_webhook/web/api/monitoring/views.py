@@ -28,7 +28,7 @@ def health_db(
     """Verifica a conexão com o banco sem expor detalhes do erro."""
     try:
         db.execute(text("SELECT 1"))
-    except Exception as exc:
-        logger.error("health check do banco falhou: %s", type(exc).__name__)
+    except Exception:
+        logger.exception("health check do banco falhou")
         return JSONResponse(status_code=503, content={"db": "erro"})
     return {"db": "ok"}

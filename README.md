@@ -78,7 +78,9 @@ uv run uvicorn granatech_webhook.web.application:app \
   --host 0.0.0.0 --port 8000 --no-access-log
 ```
 
-`--no-access-log` evita que um eventual `?token=` apareça no log de acesso.
+`--no-access-log` evita que um eventual `?token=` apareça no log de acesso. No
+lugar dele, a aplicação loga uma linha no início e outra no fim de cada
+requisição, sem a query string (veja [LGPD e logs](#lgpd-e-logs)).
 
 Sem `DATABASE_URL`, o padrão é `sqlite:///./granatech_webhook.db` (arquivo no
 diretório corrente). Em produção use sempre PostgreSQL.
@@ -95,7 +97,7 @@ Os nomes são exatamente os já configurados no Dokploy. **Não há prefixo novo
 | `ALLOWED_IPS` | vazio | IPs permitidos separados por vírgula. Vazio = libera todos. `*` também libera. |
 | `TRUST_PROXY` | `false` | `true` atrás do Traefik: usa o **primeiro** IP de `X-Forwarded-For`. |
 | `APP_ENV` | `development` | Em `production`, esconde `/docs`, `/redoc` e `/openapi.json` e loga WARNING se não houver token. |
-| `LOG_LEVEL` | `INFO` | Nível de log (stdout). |
+| `LOG_LEVEL` | `INFO` | Nível de log (stdout), aplicado também aos loggers do uvicorn após o startup. |
 | `MAX_BODY_BYTES` | `262144` | Limite do corpo em bytes (256 KB). Acima disso: `413` e o evento **não** é gravado. |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Usados por `uv run granatech-webhook`. |
 
@@ -308,8 +310,8 @@ docker run --rm -p 8000:8000 --env-file .env granatech-webhook
 O Dockerfile é multi-stage, usa `uv` com `uv.lock`, roda como usuário não-root,
 expõe a porta 8000 e tem `HEALTHCHECK` sem depender de `curl`. O entrypoint
 (`scripts/entrypoint.sh`) aplica as migrações antes de subir o uvicorn. O access
-log do uvicorn fica desligado para não registrar `?token=`; o log por evento
-continua sendo emitido pela aplicação.
+log do uvicorn fica desligado para não registrar `?token=`; a aplicação loga
+cada requisição em stdout (início, etapas, status e duração).
 
 ## CI
 
@@ -417,16 +419,26 @@ Recomendações para o primeiro deploy:
 
 ## LGPD e logs
 
-- CPF completo **nunca** é logado. O filtro de logging também mascara padrões de
-  CPF em mensagens e argumentos, e o formato `331.***.***-41` está disponível
-  para logs manuais.
+- CPF completo **nunca** é logado. O filtro de logging mascara padrões de CPF em
+  mensagens, argumentos e no texto final (inclusive stack traces); o formato
+  `331.***.***-41` está disponível para logs manuais.
 - O valor do token nunca é gravado nos headers do evento (fica `"***"`).
 - A query string não é gravada em `rota` e o access log do uvicorn é desligado.
-- Logs em stdout, uma linha por evento, com timestamp e nível:
+- Logs em stdout, uma linha por evento, com timestamp, nível e `request_id`:
 
 ```text
-2026-11-04 12:00:00,000 INFO granatech_webhook.web.api.webhooks.service evento tipo=consulta id=... status=SUCCESS tipo_notificacao=- evento_id=42 duplicado=não
+2026-11-04 12:00:00,000 INFO request_id=ef6318c17a5f439a logger=granatech_webhook.web.application requisição recebida metodo=POST rota=/webhooks/granatech ip=203.0.113.10 content_length=231
+2026-11-04 12:00:00,015 INFO request_id=ef6318c17a5f439a logger=granatech_webhook.web.api.webhooks.service payload validado tipo=consulta id=... status=SUCCESS
+2026-11-04 12:00:00,031 INFO request_id=ef6318c17a5f439a logger=granatech_webhook.web.api.webhooks.service evento bruto gravado evento_id=42 rota=/webhooks/granatech duplicado=não
+2026-11-04 12:00:00,032 INFO request_id=ef6318c17a5f439a logger=granatech_webhook.web.api.webhooks.service evento tipo=consulta id=... status=SUCCESS tipo_notificacao=- evento_id=42 duplicado=não
+2026-11-04 12:00:00,033 INFO request_id=ef6318c17a5f439a logger=granatech_webhook.web.application resposta status=200 duracao_ms=33.1 metodo=POST rota=/webhooks/granatech
 ```
+
+- `request_id` correlaciona todas as linhas da mesma requisição (também em
+  401/403/413 e resultados duplicados). `/health` e `/health/db` ficam fora do
+  log para não poluir o painel.
+- Erros trazem stack trace (`logger.exception`); um CPF presente na mensagem do
+  driver é mascarado antes de chegar ao stdout.
 
 ## Decisões tomadas por falta de informação
 

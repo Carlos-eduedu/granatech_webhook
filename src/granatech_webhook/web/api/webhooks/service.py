@@ -150,7 +150,7 @@ def _registrar_bruto(
 ) -> ResultadoRegistro:
     """Chama o registro; qualquer falha de banco vira ``FalhaRegistro``."""
     try:
-        return registrar_evento(
+        resultado = registrar_evento(
             db,
             tipo=tipo,
             rota=rota,
@@ -162,13 +162,16 @@ def _registrar_bruto(
             erro=erro,
         )
     except Exception as exc:
-        logger.error(
-            "falha ao gravar evento bruto rota=%s ip=%s erro=%s",
-            rota,
-            ip_origem,
-            type(exc).__name__,
-        )
+        logger.exception("falha ao gravar evento bruto rota=%s ip=%s", rota, ip_origem)
         raise FalhaRegistro from exc
+
+    logger.info(
+        "evento bruto gravado evento_id=%s rota=%s duplicado=%s",
+        resultado.evento.id,
+        rota,
+        "sim" if resultado.duplicado else "não",
+    )
+    return resultado
 
 
 def marcar_evento_falha(db: Session, evento_id: int, erro: str) -> None:
@@ -181,13 +184,9 @@ def marcar_evento_falha(db: Session, evento_id: int, erro: str) -> None:
         evento.processado = False
         evento.erro = erro[:4000]
         db.commit()
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        logger.error(
-            "não foi possível marcar falha do evento_id=%s: %s",
-            evento_id,
-            type(exc).__name__,
-        )
+        logger.exception("não foi possível marcar falha do evento_id=%s", evento_id)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +264,11 @@ def processar_consulta(db: Session, evento: EventoWebhook, payload: ConsultaPayl
         except IntegrityError:
             db.rollback()
             if tentativa == 0:
+                # Sem exc_info: a mensagem do driver pode conter o CPF.
+                logger.warning(
+                    "concorrência ao gravar consulta; tentando novamente evento_id=%s",
+                    evento_id,
+                )
                 evento = db.get(EventoWebhook, evento_id) or evento
                 continue
             raise
@@ -370,6 +374,11 @@ def processar_proposta(db: Session, evento: EventoWebhook, payload: PropostaPayl
         except IntegrityError:
             db.rollback()
             if tentativa == 0:
+                # Sem exc_info: a mensagem do driver pode conter o CPF.
+                logger.warning(
+                    "concorrência ao gravar proposta; tentando novamente evento_id=%s",
+                    evento_id,
+                )
                 evento = db.get(EventoWebhook, evento_id) or evento
                 continue
             raise
@@ -528,6 +537,12 @@ def processar_webhook(
         tipo_notificacao = payload.tipo_notificacao
         chave_entidade = chave_entidade_proposta(identificador)
 
+    logger.info(
+        "payload validado tipo=%s id=%s status=%s",
+        tipo,
+        identificador,
+        status,
+    )
     registrado = _registrar_bruto(
         db,
         tipo=tipo,
@@ -557,12 +572,11 @@ def processar_webhook(
         else:
             processar_proposta(db, evento, payload)
     except Exception as exc:
-        logger.error(
-            "falha ao processar evento tipo=%s id=%s evento_id=%s erro=%s",
+        logger.exception(
+            "falha ao processar evento tipo=%s id=%s evento_id=%s",
             tipo,
             identificador,
             evento.id,
-            type(exc).__name__,
         )
         marcar_evento_falha(
             db,
