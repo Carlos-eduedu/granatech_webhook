@@ -1,7 +1,7 @@
 """Testes unitários de infraestrutura e casos de borda (cobertura)."""
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from alembic import command
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from granatech_webhook import migrate
 from granatech_webhook.db.base import criar_engine
+from granatech_webhook.db.dao import consulta_dao, evento_dao, proposta_dao
 from granatech_webhook.db.dependencies import get_db_session
 from granatech_webhook.settings import (
     DATABASE_URL_PADRAO,
@@ -20,6 +21,7 @@ from granatech_webhook.settings import (
 )
 from granatech_webhook.web import lifespan as lifespan_module
 from granatech_webhook.web.api.webhooks import dependencies, service
+from granatech_webhook.web.api.webhooks.exceptions import FalhaRegistro
 from granatech_webhook.web.api.webhooks.schemas import (
     ConsultaPayload,
     PropostaPayload,
@@ -242,20 +244,21 @@ def test_bloquear_entidade_ignora_chave_vazia_e_chama_daos(
 ) -> None:
     chamadas: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        service.consulta_dao,
+        consulta_dao,
         "bloquear",
         lambda _db, ident: chamadas.append(("consulta", ident)),
     )
     monkeypatch.setattr(
-        service.proposta_dao,
+        proposta_dao,
         "bloquear",
         lambda _db, ident: chamadas.append(("proposta", ident)),
     )
 
-    service._bloquear_entidade(SimpleNamespace(), None)
-    service._bloquear_entidade(SimpleNamespace(), "proposta:")
-    service._bloquear_entidade(SimpleNamespace(), "consulta:abc")
-    service._bloquear_entidade(SimpleNamespace(), "proposta:def")
+    db = cast(Session, SimpleNamespace())
+    service._bloquear_entidade(db, None)
+    service._bloquear_entidade(db, "proposta:")
+    service._bloquear_entidade(db, "consulta:abc")
+    service._bloquear_entidade(db, "proposta:def")
 
     assert chamadas == [("consulta", "abc"), ("proposta", "def")]
 
@@ -267,7 +270,7 @@ def test_registrar_bruto_converte_falha(
         raise RuntimeError("falha de banco")
 
     monkeypatch.setattr(service, "registrar_evento", explodir)
-    with session_factory() as db, pytest.raises(service.FalhaRegistro):
+    with session_factory() as db, pytest.raises(FalhaRegistro):
         service._registrar_bruto(
             db,
             tipo=None,
@@ -326,7 +329,7 @@ def test_registrar_evento_trata_corrida_de_commit(
             pass
 
     monkeypatch.setattr(service, "_buscar_existente", buscar)
-    monkeypatch.setattr(service.evento_dao, "criar", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(evento_dao, "criar", lambda *_args, **_kwargs: SimpleNamespace())
 
     resultado = service.registrar_evento(
         DbCorrida(),  # type: ignore[arg-type]
