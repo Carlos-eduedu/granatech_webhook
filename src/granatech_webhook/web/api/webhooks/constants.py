@@ -18,6 +18,8 @@ CONSULTA_STATUS_DESCRICOES: dict[str, str] = {
     ),
     "PROCESSING": "Em processamento",
     "SUCCESS": "Concluída com sucesso",
+    # A Granatech também envia os status de consulta em português.
+    "CONCLUIDO": "Concluída com sucesso",
     "PENDING": "Pendente",
     "NO_MARGIN": "Cliente sem margem disponível",
     "USED": "Solicitação já utilizada",
@@ -25,7 +27,7 @@ CONSULTA_STATUS_DESCRICOES: dict[str, str] = {
 }
 
 CONSULTA_STATUS_FINAIS: frozenset[str] = frozenset(
-    {"SUCCESS", "NO_MARGIN", "USED", "UNEXPECTED_ERROR"}
+    {"SUCCESS", "NO_MARGIN", "USED", "UNEXPECTED_ERROR", "CONCLUIDO"}
 )
 
 # ---------------------------------------------------------------------------

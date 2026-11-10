@@ -1,0 +1,9 @@
+{
+  "id_solicitacao": "d1b2e3f4-1111-4222-8333-444455556666",
+  "id_proposta": "6fdf2acb-cd75-416f-8754-3744e786a6a6",
+  "cpf": "39053344705",
+  "status": "CONCLUIDO",
+  "user_id": "12345678901.77",
+  "corban_id": 44,
+  "tipo": "CONSULTA"
+}

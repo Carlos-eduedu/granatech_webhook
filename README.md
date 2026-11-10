@@ -178,9 +178,9 @@ posterior com o campo preenche o valor, e um evento mínimo **não apaga** o que
 já estava gravado.
 
 Status conhecidos: `AWAITING_CLIENT_AUTHORIZATION`,
-`AGUARDANDO_AUTORIZACAO_DO_CLIENTE`, `PROCESSING`, `SUCCESS`, `PENDING`,
-`NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
-Finais: `SUCCESS`, `NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
+`AGUARDANDO_AUTORIZACAO_DO_CLIENTE`, `PROCESSING`, `SUCCESS`, `CONCLUIDO`,
+`PENDING`, `NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
+Finais: `SUCCESS`, `CONCLUIDO`, `NO_MARGIN`, `USED`, `UNEXPECTED_ERROR`.
 
 O CPF é normalizado para apenas dígitos com `zfill(11)` (zeros à esquerda são
 preservados). `user_id` permanece **string**, exatamente como recebido (quando

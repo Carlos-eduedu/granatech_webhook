@@ -17,6 +17,7 @@ CONSULTAS = [
     ("AWAITING_CLIENT_AUTHORIZATION", False),
     ("PROCESSING", False),
     ("SUCCESS", True),
+    ("CONCLUIDO", True),
     ("PENDING", False),
     ("NO_MARGIN", True),
     ("USED", True),
